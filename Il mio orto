@@ -1,0 +1,156 @@
+import streamlit as st
+import pandas as pd
+import sqlite3
+from datetime import datetime
+
+# --- CONFIGURAZIONE PASSWORD DI VENDITA ---
+# Cambia questa parola con la password che vuoi dare al tuo cliente pagante
+PASSWORD_CORRETTA = "agri2026"
+
+# Funzione per controllare la password
+def controlla_password():
+    if "autenticato" not in st.session_state:
+        st.session_state["autenticato"] = False
+
+    if not st.session_state["autenticato"]:
+        st.subheader("🔑 Accesso Riservato")
+        st.write("Questa applicazione è protetta. Inserisci la licenza d'uso per continuare.")
+        password_inserita = st.text_input("Inserisci la Password di Accesso:", type="password")
+        
+        if st.button("Accedi"):
+            if password_inserita == PASSWORD_CORRETTA:
+                st.session_state["autenticato"] = True
+                st.rerun()
+            else:
+                st.error("❌ Password errata. Contatta il proprietario dell'app per acquistarne una valida.")
+        return False
+    return True
+
+# Se l'utente non inserisce la password corretta, il programma si ferma qui
+if controlla_password():
+
+    # --- CONFIGURAZIONE DATABASE ---
+    DB_NAME = "registro_agricolo.db"
+
+    def init_db():
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        c.execute('''CREATE TABLE IF NOT EXISTS semine (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        pianta TEXT,
+                        varieta TEXT,
+                        data_semina TEXT,
+                        note TEXT)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS potature (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        pianta TEXT,
+                        tipo_potatura TEXT,
+                        data_potatura TEXT,
+                        note TEXT)''')
+        conn.commit()
+        conn.close()
+
+    init_db()
+
+    # --- INTERFACCIA UTENTE ---
+    st.set_page_config(page_title="AgriManager Pro", page_icon="🌱", layout="wide")
+    st.title("🌱 AgriManager - Registro Semine e Potature")
+    
+    # Pulsante per uscire dall'app
+    if st.sidebar.button("🔒 Chiudi Sessione (Logout)"):
+        st.session_state["autenticato"] = False
+        st.rerun()
+
+    st.sidebar.title("Navigazione App")
+    page = st.sidebar.radio("Vai a:", ["Dashboard", "Registra Semina", "Registra Potatura", "Esporta Dati"])
+
+    def get_data(table):
+        conn = sqlite3.connect(DB_NAME)
+        df = pd.read_sql_query(f"SELECT * FROM {table}", conn)
+        conn.close()
+        return df
+
+    # --- PAGINA 1: DASHBOARD ---
+    if page == "Dashboard":
+        st.header("📊 Stato del Tuo Appezzamento/Vivaio")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("Ultimi Inserimenti Semine")
+            df_semine = get_data("semine")
+            if not df_semine.empty:
+                st.dataframe(df_semine.tail(5), use_container_width=True)
+            else:
+                st.info("Nessuna semina registrata.")
+                
+        with col2:
+            st.subheader("Ultimi Inserimenti Potature")
+            df_potature = get_data("potature")
+            if not df_potature.empty:
+                st.dataframe(df_potature.tail(5), use_container_width=True)
+            else:
+                st.info("Nessuna potatura registrata.")
+
+    # --- PAGINA 2: REGISTRA SEMINA ---
+    elif page == "Registra Semina":
+        st.header("🌾 Inserisci Nuova Semina")
+        with st.form("form_semina", clear_on_submit=True):
+            pianta = st.text_input("Nome della Pianta (es. Pomodoro, Grano)")
+            varieta = st.text_input("Varietà (es. San Marzano)")
+            data_semina = st.date_input("Data di Semina", datetime.now())
+            note = st.text_area("Note aggiuntive")
+            submit = st.form_submit_button("Salva Semina")
+            
+            if submit:
+                if pianta:
+                    conn = sqlite3.connect(DB_NAME)
+                    c = conn.cursor()
+                    c.execute("INSERT INTO semine (pianta, varieta, data_semina, note) VALUES (?, ?, ?, ?)",
+                              (pianta, varieta, str(data_semina), note))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Semina di {pianta} registrata con successo!")
+                else:
+                    st.error("Il nome della pianta è obbligatorio.")
+
+    # --- PAGINA 3: REGISTRA POTATURA ---
+    elif page == "Registra Potatura":
+        st.header("✂️ Inserisci Nuova Potatura")
+        with st.form("form_potatura", clear_on_submit=True):
+            pianta = st.text_input("Nome della Pianta/Albero (es. Olivo, Vite)")
+            tipo_potatura = st.selectbox("Tipo di Potatura", ["Secca/Invernale", "Verde/Estiva", "Di Formazione", "Di Riforma"])
+            data_potatura = st.date_input("Data di Potatura", datetime.now())
+            note = st.text_area("Note aggiuntive")
+            submit = st.form_submit_button("Salva Potatura")
+            
+            if submit:
+                if pianta:
+                    conn = sqlite3.connect(DB_NAME)
+                    c = conn.cursor()
+                    c.execute("INSERT INTO potature (pianta, tipo_potatura, data_potatura, note) VALUES (?, ?, ?, ?)",
+                              (pianta, tipo_potatura, str(data_potatura), note))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Potatura di {pianta} registrata con successo!")
+                else:
+                    st.error("Il nome della pianta è obbligatorio.")
+
+    # --- PAGINA 4: ESPORTA DATI ---
+    elif page == "Esporta Dati":
+        st.header("💾 Esporta Registri")
+        df_s = get_data("semine")
+        df_p = get_data("potature")
+        
+        st.subheader("Download Dati Semine")
+        if not df_s.empty:
+            csv_s = df_s.to_csv(index=False).encode('utf-8')
+            st.download_button("Scarica Semine (CSV)", csv_s, "registro_semine.csv", "text/csv")
+        else:
+            st.caption("Nessun dato disponibile.")
+            
+        st.subheader("Download Dati Potature")
+        if not df_p.empty:
+            csv_p = df_p.to_csv(index=False).encode('utf-8')
+            st.download_button("Scarica Potature (CSV)", csv_p, "registro_potature.csv", "text/csv")
+        else:
+            st.caption("Nessun dato disponibile.")
